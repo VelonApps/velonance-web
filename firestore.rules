@@ -1,0 +1,127 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function signed() { return request.auth != null && request.auth.token.email_verified == true && request.auth.token.firebase.sign_in_provider == 'google.com'; }
+  function me() {return get(/databases/$(database)/documents/authorizedUsers/$(request.auth.uid)).data;}
+  function member(studio) {let u=me();return signed() && u.uid == request.auth.uid && u.email == request.auth.token.email && u.active == true && u.studioId == studio && u.role in ['ADMIN','VIEWER'];}
+  function admin(studio) {return member(studio) && me().role == 'ADMIN';}
+  function str(v) {return v is string && v.size() <= 500;}
+  function ident(v) {return v is string && v.size() <= 128;}
+  function date(v) {return v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');}
+  function money(v) {return v is int && v >= 0 && v <= 1000000000000;}
+  function positive(v) {return money(v) && v > 0;}
+  function currency(v) {return v is string && v.matches('^[A-Z]{3}$');}
+  function scale(v) {return v in ['JPY','KRW'] ? 1 : v in ['KWD','BHD','OMR'] ? 1000 : 100;}
+  function tryOK(d) {return math.abs(float(d.amountMinor)*float(d.rateMicros) / float(scale(d.currency)*10000)-float(d.tryMinor))<=0.51;}
+  function meta(d) {return d.schemaVersion == 1 && d.deleted is bool && d.updatedBy == request.auth.uid && d.updatedAt == request.time && (request.method == 'create' ? d.createdBy == request.auth.uid && d.createdAt == request.time && d.deleted == false : d.createdBy == resource.data.createdBy && d.createdAt == resource.data.createdAt && d.schemaVersion == resource.data.schemaVersion);}
+  function keys(d,fields) {return d.keys().hasOnly(fields.concat(['createdAt','updatedAt','createdBy','updatedBy','schemaVersion','deleted']));}
+  function accountOK(s,d) {let a=get(/databases/$(database)/documents/studios/$(s)/accounts/$(d.accountId)).data;return a.deleted == false && a.archived == false && a.currency == d.currency && d.cashDate >= a.openingDate;}
+  function group(v) {return v in ['income','advertising','ai','infrastructure','business','development','other'];}
+  function app(s,id) {return get(/databases/$(database)/documents/studios/$(s)/applications/$(id)).data;}
+  function part(arr,i) {return arr.size() <= i || arr[i].basisPoints > 0;}
+  function bp(arr,i) {return arr.size() <= i ? 0 : arr[i].basisPoints;}
+  function allocations(d) {return d.allocations.size()==0 || (d.allocations.size() <= 5 && d.kind=='expense' && d.applicationId=='' && part(d.allocations,0) && part(d.allocations,1) && part(d.allocations,2) && part(d.allocations,3) && part(d.allocations,4) && bp(d.allocations,0)+bp(d.allocations,1)+bp(d.allocations,2)+bp(d.allocations,3)+bp(d.allocations,4)==10000);}
+  function categoryOK(s,d) {return d.categoryId=='' || categoryMatch(get(/databases/$(database)/documents/studios/$(s)/categories/$(d.categoryId)).data,d);}
+  function categoryMatch(c,d) {return c.deleted==false && c.kind==d.kind && c.group==d.group;}
+  function transactionValid(s,d) {
+   return d.size()==32 && meta(d)
+    && str(d.title) && d.title.size()>=2 && d.description is string && positive(d.amountMinor) && currency(d.currency) && positive(d.rateMicros) && positive(d.tryMinor) && (d.currency!='TRY' || d.rateMicros==1000000) && tryOK(d)
+    && date(d.date) && date(d.conversionDate) && d.conversionMethod=='manual' && d.status in ['pending','settled','cancelled'] && (d.cashDate=='' || date(d.cashDate)) && d.accountId is string && d.applicationId is string && d.categoryId is string && group(d.group) && d.notes is string && d.vendor is string && d.invoice is string && d.attachmentName is string && (d.expectedDate=='' || date(d.expectedDate)) && d.linkId is string
+    && (d.status!='settled' || accountOK(s,d)) && (d.applicationId=='' || app(s,d.applicationId).deleted==false)
+    && categoryOK(s,d)
+    && allocations(d) && (d.apple==null || (d.kind=='income' && d.apple is map && d.apple.keys().hasOnly(['mode','grossMinor','commissionBps','refundMinor','adjustmentMinor','netMinor','period']) && d.apple.mode in ['gross','net'] && money(d.apple.grossMinor) && money(d.apple.refundMinor) && d.apple.commissionBps is int && d.apple.commissionBps>=0 && d.apple.commissionBps<=10000 && d.apple.adjustmentMinor is int && math.abs(d.apple.adjustmentMinor)<=1000000000000 && d.apple.netMinor==d.amountMinor && str(d.apple.period)))
+    && d.cashInMinor==(d.status=='settled' && d.kind in ['income','transfer_in','debt_draw','debt_collect'] ? d.amountMinor : 0) && d.cashOutMinor==(d.status=='settled' && d.kind in ['expense','transfer_out','debt_lend','debt_repay'] ? d.amountMinor : 0) && d.deleted==false;
+  }
+  function transferValid(s,id,d) {let other=getAfter(/databases/$(database)/documents/studios/$(s)/transactions/$(d.linkId)).data;return d.status=='settled' && other.linkId==id && other.accountId!=d.accountId && other.date==d.date && other.cashDate==d.cashDate && (d.currency!=other.currency || d.amountMinor==other.amountMinor) && (d.kind=='transfer_in' ? other.kind=='transfer_out' : other.kind=='transfer_in');}
+  function paymentLink(s,id,d) {return getAfter(/databases/$(database)/documents/studios/$(s)/repayments/$(id)).data;}
+  function debtEntryValid(s,id,d) {let o=getAfter(/databases/$(database)/documents/studios/$(s)/obligations/$(d.linkId)).data;return d.status=='settled' && (d.kind in ['debt_draw','debt_lend'] ? id==d.linkId && o.asset=='currency' && o.unit==d.currency && o.quantityMicros*scale(d.currency)==d.amountMinor*1000000 && o.date==d.date && o.createdAt==request.time && (d.kind=='debt_draw'?o.direction=='payable':o.direction=='receivable') : d.kind in ['debt_repay','debt_collect'] && paymentOK(paymentLink(s,id,d),id,d) && (d.kind=='debt_repay'?o.direction=='payable':o.direction=='receivable'));}
+  function paymentOK(p,id,d) {return p.transactionId==id && p.obligationId==d.linkId;}
+  function reversalValid(s,id) {let n=request.resource.data;let o=resource.data;return n.diff(o).affectedKeys().hasOnly(['status','cashInMinor','cashOutMinor','updatedAt','updatedBy']) && n.status=='cancelled' && o.status=='settled' && o.linkId!='' && n.cashInMinor==0 && n.cashOutMinor==0 && n.updatedBy==request.auth.uid && n.updatedAt==request.time && (o.kind in ['income','expense'] ? true : o.kind in ['transfer_in','transfer_out'] ? getAfter(/databases/$(database)/documents/studios/$(s)/transactions/$(o.linkId)).data.status=='cancelled' : o.kind in ['debt_draw','debt_lend'] ? getAfter(/databases/$(database)/documents/studios/$(s)/obligations/$(o.linkId)).data.deleted==true : getAfter(/databases/$(database)/documents/studios/$(s)/repayments/$(id)).data.deleted==true);}
+  function obligationEdit() {let n=request.resource.data;return meta(n) && n.diff(resource.data).affectedKeys().hasOnly(['title','counterparty','dueDate','notes','terms','interestBps','updatedAt','updatedBy']) && str(n.title) && n.title.size()>=2 && str(n.counterparty) && n.counterparty.size()>=2 && date(n.dueDate) && str(n.notes) && str(n.terms) && n.interestBps is int && n.interestBps>=0 && n.interestBps<=100000;}
+  function obligationCancel(s,id) {let n=request.resource.data;let entry=/databases/$(database)/documents/studios/$(s)/transactions/$(id);return meta(n) && n.diff(resource.data).affectedKeys().hasOnly(['deleted','updatedAt','updatedBy']) && n.deleted==true && resource.data.repaidMicros==0 && (!existsAfter(entry) || getAfter(entry).data.status=='cancelled');}
+  function obligationReversal(s,id) {let n=request.resource.data;let p=/databases/$(database)/documents/studios/$(s)/repayments/$(n.lastRepaymentId);return meta(n) && n.diff(resource.data).affectedKeys().hasOnly(['repaidMicros','lastRepaymentId','updatedAt','updatedBy']) && get(p).data.deleted==false && getAfter(p).data.deleted==true && getAfter(p).data.obligationId==id && n.repaidMicros>=0 && n.repaidMicros==resource.data.repaidMicros-getAfter(p).data.quantityMicros;}
+  function repaymentReversal(s,id) {let n=request.resource.data;let o=resource.data;let parent=getAfter(/databases/$(database)/documents/studios/$(s)/obligations/$(o.obligationId)).data;return n.diff(o).affectedKeys().hasOnly(['deleted','updatedAt','updatedBy']) && n.deleted==true && o.deleted==false && n.updatedBy==request.auth.uid && n.updatedAt==request.time && parent.lastRepaymentId==id && parent.updatedAt==request.time && (o.transactionId=='' || getAfter(/databases/$(database)/documents/studios/$(s)/transactions/$(o.transactionId)).data.status=='cancelled');}
+  match /accessDenied/{uid} {
+   allow get,list: if signed() && admin(resource.data.studioId);
+   allow create,update: if signed() && request.auth.uid==uid && request.resource.data.keys().hasOnly(['uid','email','studioId','lastAt','userAgent','schemaVersion']) && request.resource.data.uid==uid && request.resource.data.email==request.auth.token.email && ident(request.resource.data.studioId) && request.resource.data.lastAt==request.time && str(request.resource.data.userAgent) && request.resource.data.schemaVersion==1;
+   allow delete: if false;
+  }
+  match /authorizedUsers/{uid} {
+   allow get: if signed() && (request.auth.uid==uid || admin(resource.data.studioId));
+   allow list: if admin(resource.data.studioId);
+   allow write: if false;
+  }
+  match /studios/{studio} {
+   allow read: if member(studio);
+   allow write: if false;
+   match /transactions/{id} {
+    allow read: if member(studio);
+    allow create: if admin(studio) && transactionValid(studio,request.resource.data) && (request.resource.data.kind in ['income','expense'] || (request.resource.data.kind in ['transfer_in','transfer_out'] ? transferValid(studio,id,request.resource.data) : debtEntryValid(studio,id,request.resource.data)));
+    allow update: if admin(studio) && resource.data.kind in ['income','expense'] && resource.data.linkId=='' && request.resource.data.kind==resource.data.kind && request.resource.data.linkId==resource.data.linkId && transactionValid(studio,request.resource.data);
+    allow update: if admin(studio) && reversalValid(studio,id);
+    allow delete: if false;
+   }
+   match /applications/{id} {
+    allow read: if member(studio);
+    allow create,update: if admin(studio) && meta(request.resource.data) && keys(request.resource.data,['name','platform','bundleId','url','launchDate','status','description','icon']) && str(request.resource.data.name) && request.resource.data.name.size()>=2 && request.resource.data.deleted==false && request.resource.data.platform in ['iOS','Android','Both'] && str(request.resource.data.bundleId) && str(request.resource.data.url) && (request.resource.data.url=='' || request.resource.data.url.matches('^https://.*')) && (request.resource.data.launchDate=='' || date(request.resource.data.launchDate)) && request.resource.data.status in ['development','testing','live','paused','archived'] && str(request.resource.data.description) && str(request.resource.data.icon);
+   }
+   match /accounts/{id} {
+    allow read: if member(studio);
+    allow create,update: if admin(studio) && meta(request.resource.data) && keys(request.resource.data,['name','currency','type','openingMinor','openingDate','notes','archived']) && str(request.resource.data.name) && request.resource.data.name.size()>=2 && currency(request.resource.data.currency) && request.resource.data.type in ['bank','cash','apple','other'] && request.resource.data.openingMinor is int && math.abs(request.resource.data.openingMinor)<=1000000000000 && date(request.resource.data.openingDate) && str(request.resource.data.notes) && request.resource.data.archived is bool && request.resource.data.deleted==false && (request.method=='create' || (request.resource.data.currency==resource.data.currency && request.resource.data.openingMinor==resource.data.openingMinor && request.resource.data.openingDate==resource.data.openingDate));
+   }
+   match /categories/{id} {
+    allow read: if member(studio);
+    allow create,update: if admin(studio) && meta(request.resource.data) && keys(request.resource.data,['name','kind','group','parentId']) && str(request.resource.data.name) && request.resource.data.name.size()>=2 && request.resource.data.kind in ['income','expense'] && group(request.resource.data.group) && ident(request.resource.data.parentId);
+   }
+   match /exchangeRates/{id} {
+    allow read: if member(studio);
+    allow create: if admin(studio) && meta(request.resource.data) && keys(request.resource.data,['unit','priceMicros','date','asset']) && str(request.resource.data.unit) && request.resource.data.unit.size()>0 && positive(request.resource.data.priceMicros) && date(request.resource.data.date) && request.resource.data.asset in ['currency','gold'];
+    allow update: if admin(studio) && meta(request.resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted','updatedBy','updatedAt']);
+   }
+   match /obligations/{id} {
+    allow read: if member(studio);
+    allow create: if admin(studio) && meta(request.resource.data) && keys(request.resource.data,['direction','counterparty','title','asset','unit','quantityMicros','originalRateMicros','date','dueDate','notes','terms','interestBps','repaidMicros','lastRepaymentId']) && request.resource.data.direction in ['payable','receivable'] && str(request.resource.data.counterparty) && request.resource.data.counterparty.size()>=2 && str(request.resource.data.title) && request.resource.data.title.size()>=2 && request.resource.data.asset in ['currency','gold'] && str(request.resource.data.unit) && request.resource.data.unit.size()>0 && positive(request.resource.data.quantityMicros) && positive(request.resource.data.originalRateMicros) && date(request.resource.data.date) && date(request.resource.data.dueDate) && str(request.resource.data.notes) && str(request.resource.data.terms) && request.resource.data.interestBps is int && request.resource.data.interestBps>=0 && request.resource.data.interestBps<=100000 && request.resource.data.repaidMicros==0 && request.resource.data.lastRepaymentId=='';
+    allow update: if admin(studio) && meta(request.resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['repaidMicros','lastRepaymentId','updatedAt','updatedBy']) && positive(request.resource.data.repaidMicros) && request.resource.data.repaidMicros<=resource.data.quantityMicros && getAfter(/databases/$(database)/documents/studios/$(studio)/repayments/$(request.resource.data.lastRepaymentId)).data.obligationId==id && getAfter(/databases/$(database)/documents/studios/$(studio)/repayments/$(request.resource.data.lastRepaymentId)).data.createdAt==request.time && request.resource.data.lastRepaymentId!=resource.data.lastRepaymentId && request.resource.data.repaidMicros==resource.data.repaidMicros+getAfter(/databases/$(database)/documents/studios/$(studio)/repayments/$(request.resource.data.lastRepaymentId)).data.quantityMicros;
+    allow update: if admin(studio) && (obligationEdit() || obligationCancel(studio,id) || obligationReversal(studio,id));
+   }
+   function repaymentValid(s,id,d) {
+    let o=getAfter(/databases/$(database)/documents/studios/$(s)/obligations/$(d.obligationId)).data;
+    let entry=getAfter(/databases/$(database)/documents/studios/$(s)/transactions/$(id));
+    return meta(d) && keys(d,['obligationId','quantityMicros','currency','amountMinor','rateMicros','accountId','date','notes','agreement','transactionId','settlementAsset']) && positive(d.quantityMicros) && positive(d.rateMicros) && ident(d.obligationId) && ident(d.accountId) && date(d.date) && str(d.notes) && str(d.agreement) && o.lastRepaymentId==id
+     && (d.settlementAsset=='gold' ? o.asset=='gold' && d.currency==o.unit && d.accountId=='' && d.amountMinor==0 && d.transactionId=='' : d.settlementAsset=='currency' && positive(d.amountMinor) && currency(d.currency) && d.transactionId==id && entry.data.amountMinor==d.amountMinor && entry.data.currency==d.currency && entry.data.accountId==d.accountId && entry.data.date==d.date && entry.data.rateMicros==d.rateMicros && (o.unit==d.currency ? (o.asset!='currency' || d.quantityMicros*scale(d.currency)==d.amountMinor*1000000) : d.agreement.size()>0));
+   }
+   match /repayments/{id} {
+    allow read: if member(studio);
+    allow create: if admin(studio) && repaymentValid(studio,id,request.resource.data);
+    allow update: if admin(studio) && repaymentReversal(studio,id);
+   }
+   match /recurringTemplates/{id} {
+    allow read: if member(studio);
+    allow create,update: if admin(studio) && meta(request.resource.data) && keys(request.resource.data,['title','amountMinor','currency','rateMicros','nextDate','frequency','intervalDays','applicationId','categoryId','accountId','status','notes']) && str(request.resource.data.title) && request.resource.data.title.size()>=2 && positive(request.resource.data.amountMinor) && currency(request.resource.data.currency) && positive(request.resource.data.rateMicros) && date(request.resource.data.nextDate) && request.resource.data.frequency in ['weekly','monthly','quarterly','yearly','custom'] && request.resource.data.intervalDays is int && request.resource.data.intervalDays>=1 && request.resource.data.intervalDays<=3660 && ident(request.resource.data.applicationId) && ident(request.resource.data.categoryId) && ident(request.resource.data.accountId) && request.resource.data.status in ['active','paused','cancelled'] && str(request.resource.data.notes);
+   }
+   match /recurringOccurrences/{id} {
+    allow read: if member(studio);
+    allow create: if admin(studio) && meta(request.resource.data) && keys(request.resource.data,['templateId','date','status','transactionId']) && ident(request.resource.data.templateId) && date(request.resource.data.date) && id==request.resource.data.templateId+'_'+request.resource.data.date && get(/databases/$(database)/documents/studios/$(studio)/recurringTemplates/$(request.resource.data.templateId)).data.nextDate==request.resource.data.date && get(/databases/$(database)/documents/studios/$(studio)/recurringTemplates/$(request.resource.data.templateId)).data.status=='active' && getAfter(/databases/$(database)/documents/studios/$(studio)/recurringTemplates/$(request.resource.data.templateId)).data.nextDate>request.resource.data.date && (request.resource.data.status=='skipped' ? request.resource.data.transactionId=='' : request.resource.data.status=='paid' && request.resource.data.transactionId==id && getAfter(/databases/$(database)/documents/studios/$(studio)/transactions/$(id)).data.linkId==id);
+   }
+   match /advertisingCampaigns/{id} {
+    allow read: if member(studio);
+    allow create,update: if admin(studio) && meta(request.resource.data) && keys(request.resource.data,['name','platform','applicationId','spendMinor','currency','impressions','clicks','installs','attributedRevenueMinor','source','date','endDate']) && str(request.resource.data.name) && request.resource.data.name.size()>=2 && str(request.resource.data.platform) && ident(request.resource.data.applicationId) && money(request.resource.data.spendMinor) && currency(request.resource.data.currency) && money(request.resource.data.impressions) && money(request.resource.data.clicks) && money(request.resource.data.installs) && money(request.resource.data.attributedRevenueMinor) && str(request.resource.data.source) && request.resource.data.source.size()>=2 && date(request.resource.data.date) && date(request.resource.data.endDate);
+   }
+   match /settings/{id} {
+    allow read: if member(studio);
+    allow create,update: if admin(studio) && id=='general' && meta(request.resource.data) && keys(request.resource.data,['name','currency','timezone','locale']) && str(request.resource.data.name) && request.resource.data.name.size()>=2 && request.resource.data.currency=='TRY' && request.resource.data.timezone=='Europe/Istanbul' && request.resource.data.locale=='tr-TR';
+   }
+   match /auditLogs/{id} {
+    allow read: if admin(studio);
+    allow create: if admin(studio) && request.resource.data.keys().hasOnly(['entityType','entityId','action','actorUid','actorEmail','timestamp','before','after','schemaVersion']) && request.resource.data.actorUid==request.auth.uid && (!('actorEmail' in request.resource.data) || request.resource.data.actorEmail==request.auth.token.email) && request.resource.data.timestamp==request.time && request.resource.data.schemaVersion==1 && str(request.resource.data.entityType) && ident(request.resource.data.entityId) && str(request.resource.data.action) && (request.resource.data.before==null || request.resource.data.before is map) && (request.resource.data.after==null || request.resource.data.after is map);
+    allow update,delete: if false;
+   }
+   match /accessLogs/{id} {
+    allow read: if admin(studio);
+    allow create: if member(studio) && request.resource.data.keys().hasOnly(['event','uid','email','displayName','at','userAgent','schemaVersion']) && request.resource.data.event in ['sign_in','sign_out'] && request.resource.data.uid==request.auth.uid && request.resource.data.email==request.auth.token.email && str(request.resource.data.displayName) && request.resource.data.at==request.time && str(request.resource.data.userAgent) && request.resource.data.schemaVersion==1;
+    allow update,delete: if false;
+   }
+  }
+  match /{document=**} {allow read,write: if false;}
+ }
+}

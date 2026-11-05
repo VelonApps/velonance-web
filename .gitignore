@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+.firebase/
+.firebaserc
+*service-account*.json
+*serviceAccount*.json
+*-adminsdk-*.json
+.DS_Store
+playwright-report/
+test-results/
+*.tsbuildinfo
