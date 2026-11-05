@@ -1,5 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { balances, listEntities, listTransactions, REPORT_LIMIT } from './repository'
+import { latestRates } from './finance'
+import { fetchLiveRates, liveRateMap } from './liveRates'
 import type {
   Account,
   Application,
@@ -30,6 +32,25 @@ export function useReference() {
     loading: [apps, accounts, categories, rates].some((q) => q.isPending),
     error: [apps, accounts, categories, rates].find((q) => q.error)?.error,
     truncated: [apps, accounts, categories, rates].some((q) => q.data?.truncated),
+  }
+}
+export function useLiveRates() {
+  return useQuery({
+    queryKey: ['live-rates'],
+    queryFn: fetchLiveRates,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    retry: 1,
+  })
+}
+// Kaydedilmiş son fiyatlar + varsa canlı fiyatlar (canlı olan daha günceldir, üstüne yazar).
+export function useRates() {
+  const ref = useReference(),
+    live = useLiveRates()
+  return {
+    rates: new Map([...latestRates(ref.rates), ...liveRateMap(live.data)]),
+    live: live.data,
+    liveError: live.error,
   }
 }
 export function useReport(start: string, end: string, field: 'date' | 'cashDate' = 'date') {

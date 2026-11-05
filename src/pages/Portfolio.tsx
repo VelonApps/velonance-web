@@ -218,7 +218,13 @@ export default function Portfolio() {
               : Object.fromEntries(Object.entries(form).filter(([, v]) => typeof v === 'string'))
           }
           fields={[
-            { name: 'name', label: 'Uygulama adı', required: true, full: true },
+            {
+              name: 'name',
+              label: 'Uygulama adı',
+              required: true,
+              full: true,
+              example: 'NexaRoom',
+            },
             {
               name: 'platform',
               label: 'Platform',
@@ -232,13 +238,24 @@ export default function Portfolio() {
               label: 'Durum',
               options: Object.entries(labels).map(([value, label]) => ({ value, label })),
             },
-            { name: 'bundleId', label: 'Bundle identifier' },
-            { name: 'url', label: 'App Store / Play Store URL', type: 'url' },
+            {
+              name: 'bundleId',
+              label: 'Bundle identifier',
+              example: 'com.velonapps.nexaroom',
+              help: 'Xcode’daki uygulama kimliği. İsteğe bağlı.',
+            },
+            {
+              name: 'url',
+              label: 'App Store / Play Store URL',
+              type: 'url',
+              example: 'https://apps.apple.com/app/id123456789',
+            },
             { name: 'launchDate', label: 'Yayın tarihi', type: 'date' },
             {
               name: 'icon',
               label: 'İkon referansı',
-              help: 'Güvenli metin metadata olarak saklanır.',
+              example: '🛋️',
+              help: 'Kartta görünecek kısa bir emoji veya harf. Görsel yüklenmez.',
             },
             { name: 'description', label: 'Açıklama', type: 'textarea', full: true },
           ]}

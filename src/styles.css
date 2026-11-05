@@ -1505,6 +1505,38 @@ td small {
 .field-error {
   color: var(--danger);
 }
+.field-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.field-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.field-info:hover,
+.field-info.open {
+  color: var(--green);
+  background: var(--soft);
+}
+.field-help {
+  background: var(--soft);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px 10px;
+}
+.field input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
 .form-actions {
   display: flex;
   justify-content: flex-end;

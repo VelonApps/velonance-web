@@ -14,11 +14,17 @@ import {
   Wallet,
 } from 'lucide-react'
 import { useAuth } from '../lib/auth'
-import { useBalances, useObligations, useRecurring, useReference, useReport } from '../lib/data'
+import {
+  useBalances,
+  useObligations,
+  useRecurring,
+  useReference,
+  useReport,
+  useRates,
+} from '../lib/data'
 import {
   chartMonths,
   dateLabel,
-  latestRates,
   rateKey,
   money,
   number,
@@ -55,7 +61,8 @@ export default function Dashboard() {
     [form, setForm] = useState<'income' | 'expense' | null>(null)
   const rows = report.data?.rows || [],
     stats = totals(rows),
-    rates = latestRates(ref.rates),
+    liveRates = useRates(),
+    rates = liveRates.rates,
     cash = valuation(balance.data || [], rates),
     obligations = debts.data?.rows || [],
     payable = obligations.filter((o) => o.direction === 'payable'),

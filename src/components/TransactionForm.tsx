@@ -10,6 +10,7 @@ import {
   d,
   fromMinor,
   money,
+  parseAmount,
   toMicros,
   toMinor,
   today,
@@ -18,31 +19,53 @@ import { useReference, useRefresh } from '../lib/data'
 import { currencies } from '../lib/models'
 import type { Transaction } from '../lib/models'
 import { Button, ErrorNotice, Fields, Modal, Notice, useToast } from './ui'
+import { useRateSync } from './EntityForm'
 import type { FieldDef } from './ui'
-const schema = z.object({
-  title: z.string().min(2, 'En az iki karakter girin.'),
-  description: z.string(),
-  amount: z.string(),
-  currency: z.string(),
-  rate: z.string().min(1),
-  date: z.string().min(1),
-  status: z.string(),
-  cashDate: z.string(),
-  accountId: z.string(),
-  applicationId: z.string(),
-  categoryId: z.string(),
-  notes: z.string(),
-  vendor: z.string(),
-  invoice: z.string(),
-  attachmentName: z.string(),
-  expectedDate: z.string(),
-  appleMode: z.string(),
-  gross: z.string(),
-  commission: z.string(),
-  refund: z.string(),
-  adjustment: z.string(),
-  period: z.string(),
-})
+const schema = z
+  .object({
+    title: z.string().trim().min(2, 'Başlık en az iki karakter olmalı.'),
+    description: z.string(),
+    amount: z.string(),
+    currency: z.string(),
+    rate: z.string().min(1),
+    tryTotal: z.string(),
+    date: z.string().min(1),
+    status: z.string(),
+    cashDate: z.string(),
+    accountId: z.string(),
+    applicationId: z.string(),
+    categoryId: z.string(),
+    notes: z.string(),
+    vendor: z.string(),
+    invoice: z.string(),
+    attachmentName: z.string(),
+    expectedDate: z.string(),
+    appleMode: z.string(),
+    gross: z.string(),
+    commission: z.string(),
+    refund: z.string(),
+    adjustment: z.string(),
+    period: z.string(),
+  })
+  .superRefine((v, ctx) => {
+    const number = (key: 'amount' | 'rate' | 'gross', label: string) => {
+      if (!v[key].trim()) return ctx.addIssue({ code: 'custom', path: [key], message: label })
+      try {
+        if (parseAmount(v[key]).lte(0)) throw new Error('Sıfırdan büyük bir sayı girin.')
+      } catch (e) {
+        ctx.addIssue({ code: 'custom', path: [key], message: (e as Error).message })
+      }
+    }
+    if (v.appleMode === 'gross') number('gross', 'Brüt satış tutarını girin.')
+    else number('amount', 'Tutar boş bırakılamaz.')
+    if (v.currency !== 'TRY') number('rate', 'Kur boş bırakılamaz.')
+    if (v.status === 'settled' && !v.accountId)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['accountId'],
+        message: 'Paranın girdiği/çıktığı hesabı seçin.',
+      })
+  })
 type Values = z.infer<typeof schema>
 export default function TransactionForm({
   kind,
@@ -68,12 +91,14 @@ export default function TransactionForm({
     )
   const form = useForm<Values>({
     resolver: zodResolver(schema),
+    mode: 'onTouched',
     defaultValues: {
       title: initial?.title || '',
       description: initial?.description || '',
       amount: initial ? fromMinor(initial.amountMinor, initial.currency) : '',
       currency: initial?.currency || 'TRY',
       rate: initial ? d(initial.rateMicros).div(1e6).toString() : '1',
+      tryTotal: initial ? fromMinor(initial.tryMinor).replace('.', ',') : '',
       date: initial?.date || today(),
       status: initial?.status || 'pending',
       cashDate: initial?.cashDate || today(),
@@ -93,6 +118,7 @@ export default function TransactionForm({
       period: initial?.apple?.period || today().slice(0, 7),
     },
   })
+  const sync = useRateSync({ quantity: 'amount', rate: 'rate', total: 'tryTotal' })
   const values = form.watch(),
     opt = (items: { id: string; name: string }[]) => [
       { value: '', label: 'Seçilmedi' },
@@ -129,12 +155,17 @@ export default function TransactionForm({
       name: 'title',
       label: kind === 'income' ? 'Gelir başlığı' : 'Gider başlığı',
       required: true,
+      example: kind === 'income' ? 'App Store Ekim 2026 geliri' : 'Apple Search Ads – Ekim',
+      help: 'Listede ve raporlarda görünecek kısa ad. Neyin geliri/gideri olduğunu anlatsın.',
       full: true,
     },
     {
       name: 'amount',
       label: values.appleMode === 'gross' ? 'Net tutar aşağıda hesaplanır' : 'Orijinal tutar',
       required: values.appleMode !== 'gross',
+      numeric: true,
+      example: '1.234,56',
+      help: 'Seçtiğin para birimindeki tutar. Kuruş için virgül kullanabilirsin.',
       disabled: values.appleMode === 'gross',
     },
     {
@@ -151,49 +182,94 @@ export default function TransactionForm({
     {
       name: 'rate',
       label: '1 birim = kaç TRY?',
-      help: 'İşleme ait tarihsel kur; güncel fiyatlardan bağımsız.',
+      numeric: true,
+      example: '42,35',
+      help: 'İşlem günündeki kur: 1 USD kaç TL ise onu yaz. TRY işlemlerde 1 kalır. Sonradan kur değişse bile bu kayıttaki TL karşılığı değişmez.',
       disabled: values.currency === 'TRY',
     },
-    { name: 'date', label: 'Tahakkuk tarihi', type: 'date', required: true },
+    ...(values.currency !== 'TRY' && values.appleMode !== 'gross'
+      ? [
+          {
+            name: 'tryTotal',
+            label: 'Toplam TL karşılığı',
+            numeric: true,
+            example: '4235',
+            help: 'Tutar ile kuru girersen kendiliğinden dolar. Kuru bilmiyorsan bankada geçen TL tutarını yaz; 1 birimin TL değeri hesaplanır.',
+          },
+        ]
+      : []),
+    {
+      name: 'date',
+      label: 'Tahakkuk tarihi',
+      type: 'date',
+      required: true,
+      help: 'Gelirin kazanıldığı / giderin oluştuğu gün. Para daha sonra hesaba geçecekse ödeme tarihini ayrıca girersin.',
+    },
     {
       name: 'categoryId',
       label: 'Kategori',
+      help: 'Raporlardaki gruplamayı belirler. Listede yoksa Ayarlar → Kategoriler ekranından ekle.',
       options: opt(ref.categories.filter((c) => !c.deleted && c.kind === kind)),
     },
     {
       name: 'applicationId',
       label: 'İlgili uygulama',
+      help: 'Bu gelir/gider tek bir uygulamaya aitse seç. Birden fazla uygulamaya aitse boş bırakıp aşağıdan dağılım ekle; şirket geneli bir masrafsa boş bırak.',
       options: opt(ref.apps.filter((a) => a.status !== 'archived')),
     },
     {
       name: 'status',
       label: 'Ödeme durumu',
+      help: 'Para hesaba girdi/çıktıysa “Ödendi / Tahsil edildi” seç; hesap bakiyesi ancak o zaman değişir. Henüz gelmediyse “bekleniyor” bırak, para gelince kaydı düzenle.',
       options: [
         { value: 'pending', label: kind === 'income' ? 'Tahsilat bekleniyor' : 'Ödeme bekleniyor' },
         { value: 'settled', label: kind === 'income' ? 'Tahsil edildi' : 'Ödendi' },
         { value: 'cancelled', label: 'İptal edildi' },
       ],
     },
-    { name: 'expectedDate', label: 'Beklenen ödeme tarihi', type: 'date' },
+    {
+      name: 'expectedDate',
+      label: 'Beklenen ödeme tarihi',
+      type: 'date',
+      help: 'Henüz ödenmediyse paranın ne zaman gelmesini/çıkmasını beklediğin gün. Nakit akışı tahmininde kullanılır.',
+    },
     ...(values.status === 'settled'
       ? [
           {
             name: 'accountId',
             label: 'Ödeme hesabı',
             required: true,
+            help: 'Paranın girdiği veya çıktığı hesap. Sadece işlemle aynı para biriminde olan hesaplar listelenir.',
             options: opt(ref.accounts.filter((a) => a.currency === values.currency && !a.archived)),
           },
-          { name: 'cashDate', label: 'Gerçek ödeme tarihi', type: 'date', required: true },
+          {
+            name: 'cashDate',
+            label: 'Gerçek ödeme tarihi',
+            type: 'date',
+            required: true,
+            help: 'Paranın hesaba gerçekten geçtiği gün. Bakiye ve nakit akışı bu tarihe göre hesaplanır.',
+          },
         ]
       : []),
-    { name: 'vendor', label: kind === 'income' ? 'Ödeyen / kaynak' : 'Tedarikçi' },
-    { name: 'invoice', label: 'Fatura / rapor referansı' },
+    {
+      name: 'vendor',
+      label: kind === 'income' ? 'Ödeyen / kaynak' : 'Tedarikçi',
+      example: kind === 'income' ? 'Apple' : 'OpenAI',
+      help: 'Parayı ödeyen veya aldığın firma. Raporlarda tedarikçiye göre gider dağılımı bu alandan çıkar.',
+    },
+    {
+      name: 'invoice',
+      label: 'Fatura / rapor referansı',
+      example: 'INV-2026-0142',
+      help: 'Fatura numarası veya rapor adı; sonradan belgeyi bulmak için.',
+    },
     { name: 'description', label: 'Açıklama', type: 'textarea', full: true },
     { name: 'notes', label: 'Notlar', type: 'textarea', full: true },
     {
       name: 'attachmentName',
       label: 'Ek belge referansı',
-      help: 'Yalnızca metadata saklanır; dosya yüklenmez.',
+      example: 'Drive/Faturalar/ekim-openai.pdf',
+      help: 'Belgenin nerede durduğunu yaz. Dosya yüklenmez, sadece bu metin saklanır.',
       full: true,
     },
   ]
@@ -275,7 +351,15 @@ export default function TransactionForm({
       >
         <Fields
           fields={fields}
-          register={(n) => form.register(n as keyof Values)}
+          register={(n) =>
+            form.register(n as keyof Values, {
+              onChange: () => {
+                const updates = sync(n, form.getValues())
+                for (const [key, value] of Object.entries(updates || {}))
+                  form.setValue(key as keyof Values, value)
+              },
+            })
+          }
           errors={form.formState.errors}
         />
         {kind === 'income' && (
@@ -295,10 +379,34 @@ export default function TransactionForm({
                 ...(values.appleMode !== 'none'
                   ? [
                       { name: 'period', label: 'Apple rapor dönemi', type: 'month' },
-                      { name: 'gross', label: 'Brüt müşteri satışları' },
-                      { name: 'commission', label: 'Komisyon (%)' },
-                      { name: 'refund', label: 'İadeler' },
-                      { name: 'adjustment', label: 'Vergi / net düzeltme (+/−)' },
+                      {
+                        name: 'gross',
+                        label: 'Brüt müşteri satışları',
+                        numeric: true,
+                        example: '1000',
+                        help: 'Kullanıcıların ödediği toplam tutar (Apple kesintisinden önce).',
+                      },
+                      {
+                        name: 'commission',
+                        label: 'Komisyon (%)',
+                        numeric: true,
+                        example: '15',
+                        help: 'Apple kesintisi: Small Business Program’da genelde %15, değilse %30.',
+                      },
+                      {
+                        name: 'refund',
+                        label: 'İadeler',
+                        numeric: true,
+                        example: '0',
+                        help: 'Dönem içinde iade edilen tutar; yoksa 0.',
+                      },
+                      {
+                        name: 'adjustment',
+                        label: 'Vergi / net düzeltme (+/−)',
+                        numeric: true,
+                        example: '-12,50',
+                        help: 'Apple raporundaki vergi veya kur farkı düzeltmesi. Düşürüyorsa eksi yaz; yoksa 0.',
+                      },
                     ]
                   : []),
               ]}

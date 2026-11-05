@@ -4,6 +4,7 @@ import { useAuth } from '../lib/auth'
 import { useRecurring, useReference } from '../lib/data'
 import { d, dateLabel, fromMinor, money, toMicros, toMinor, today } from '../lib/finance'
 import type { Recurring } from '../lib/models'
+import { currencyOptions } from '../lib/models'
 import { saveEntity, settleOccurrence } from '../lib/repository'
 import { EntityForm } from '../components/EntityForm'
 import {
@@ -141,21 +142,57 @@ export default function RecurringPage() {
                 }
           }
           fields={[
-            { name: 'title', label: 'Başlık', required: true, full: true },
-            { name: 'amount', label: 'Tutar', required: true },
-            { name: 'currency', label: 'Para birimi', required: true, defaultValue: 'TRY' },
-            { name: 'rate', label: 'Tahmini TRY kuru', required: true, defaultValue: '1' },
+            {
+              name: 'title',
+              label: 'Başlık',
+              required: true,
+              full: true,
+              example: 'ChatGPT Plus aboneliği',
+              help: 'Düzenli tekrarlayan masrafın adı: abonelik, sunucu, lisans gibi.',
+            },
+            {
+              name: 'amount',
+              label: 'Tutar',
+              required: true,
+              numeric: true,
+              example: '20',
+              help: 'Her dönem ödenen tutar, seçtiğin para biriminde.',
+            },
+            {
+              name: 'currency',
+              label: 'Para birimi',
+              required: true,
+              defaultValue: 'TRY',
+              options: currencyOptions(ref.accounts.map((a) => a.currency)),
+            },
+            {
+              name: 'rate',
+              label: 'Tahmini TRY kuru',
+              required: true,
+              defaultValue: '1',
+              numeric: true,
+              example: '42,35',
+              help: 'Planlama için yaklaşık kur. Gerçek ödemeyi kaydederken o günün kurunu ayrıca girersin.',
+            },
             {
               name: 'frequency',
               label: 'Tekrar sıklığı',
               options: Object.entries(frequency).map(([value, label]) => ({ value, label })),
             },
-            { name: 'intervalDays', label: 'Özel tekrar aralığı (gün)', defaultValue: '30' },
+            {
+              name: 'intervalDays',
+              label: 'Özel tekrar aralığı (gün)',
+              defaultValue: '30',
+              numeric: true,
+              example: '14',
+              help: 'Sadece sıklık “Özel” seçiliyse kullanılır: kaç günde bir tekrarlanacak.',
+            },
             {
               name: 'nextDate',
               label: 'Sonraki oluşum tarihi',
               type: 'date',
               required: true,
+              help: 'Bir sonraki ödemenin beklendiği gün.',
               defaultValue: today(),
             },
             {
@@ -242,6 +279,9 @@ export default function RecurringPage() {
             {
               name: 'rate',
               label: 'Ödeme günündeki TRY kuru',
+              numeric: true,
+              example: '42,35',
+              help: 'Ödemenin yapıldığı gün 1 birim kaç TL idi. TRY için 1.',
               defaultValue: d(occurrence.rateMicros).div(1e6).toString(),
               required: true,
             },

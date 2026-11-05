@@ -47,6 +47,14 @@
         {
           "fieldPath": "deleted",
           "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "cashOutMinor",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "cashInMinor",
+          "order": "ASCENDING"
         }
       ]
     },
@@ -64,6 +72,14 @@
         },
         {
           "fieldPath": "cashDate",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "cashOutMinor",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "cashInMinor",
           "order": "ASCENDING"
         }
       ]

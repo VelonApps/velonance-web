@@ -20,6 +20,11 @@ export const scale = (currency: string) =>
 // Accepts both "1234.56" and Turkish "1.234,56"; the last separator is the decimal one.
 export function parseAmount(value: string) {
   const text = value.trim().replace(/\s/g, '')
+  // "4.300" Türkçede dört bin üç yüz, İngilizcede dört virgül üç: tahmin etmek yerine sor.
+  if (/^-?[1-9]\d{0,2}\.\d{3}$/.test(text))
+    throw new Error(
+      `“${text}” iki türlü okunabilir. Binlik için noktasız (${text.replace('.', '')}), küsurat için virgülle (${text.replace('.', ',')}) yaz.`,
+    )
   const normalized = text.includes(',')
     ? text.replaceAll('.', '').replace(',', '.')
     : text.split('.').length > 2
@@ -27,6 +32,30 @@ export function parseAmount(value: string) {
       : text
   if (!/^-?\d*\.?\d+$/.test(normalized)) throw new Error('Geçerli bir sayı girin. Örnek: 1234,56')
   return d(normalized)
+}
+const inputText = (v: Decimal, places: number) =>
+  v.toDecimalPlaces(places, Decimal.ROUND_HALF_UP).toString().replace('.', ',')
+// Keeps "1 birim = kaç TL", miktar ve toplam TL birbirine bağlı tutar.
+// anchor: kullanıcının en son elle yazdığı değer (kur mu, toplam mı); miktar değişince o korunur.
+export function syncRate(
+  changed: 'quantity' | 'rate' | 'total',
+  values: { quantity: string; rate: string; total: string },
+  anchor: 'rate' | 'total',
+): { rate?: string; total?: string } {
+  const read = (v: string) => {
+    try {
+      return v.trim() ? parseAmount(v) : null
+    } catch {
+      return null
+    }
+  }
+  const quantity = read(values.quantity),
+    rate = read(values.rate),
+    total = read(values.total)
+  if (!quantity || quantity.lte(0)) return {}
+  if (changed === 'total' || (changed === 'quantity' && anchor === 'total'))
+    return total && total.gt(0) ? { rate: inputText(total.div(quantity), 6) } : {}
+  return rate && rate.gt(0) ? { total: inputText(quantity.times(rate), 2) } : {}
 }
 export function toMinor(value: string, currency = 'TRY') {
   const n = parseAmount(value).times(scale(currency))
@@ -234,9 +263,16 @@ export function debtSummary(obligations: Obligation[], rates: Map<string, number
   const side = (direction: Obligation['direction']) => {
     const rows = open.filter((o) => o.direction === direction),
       priced = rows.filter((o) => rates.has(rateKey(o.unit, o.asset)))
+    const unpriced = rows.filter((o) => !rates.has(rateKey(o.unit, o.asset)))
     return {
       count: rows.length,
       overdue: rows.filter((o) => o.dueDate < now).length,
+      // Fiyatı olmayan kayıtlar ilk kurla eklenir ki toplam borç hiç sıfır görünmesin.
+      estimate: sum([
+        ...priced.map((o) => valueQuantity(remaining(o), rates.get(rateKey(o.unit, o.asset))!)),
+        ...unpriced.map((o) => valueQuantity(remaining(o), o.originalRateMicros)),
+      ]),
+      fallbackCount: unpriced.length,
       current: sum(
         priced.map((o) => valueQuantity(remaining(o), rates.get(rateKey(o.unit, o.asset))!)),
       ),

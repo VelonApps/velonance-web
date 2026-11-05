@@ -69,3 +69,7 @@ Güvenlik sorunlarını herkese açık issue'ya hassas veri veya token ekleyerek
 ## Kural ifade sınırı
 
 Firestore bir kural değerlendirmesinde en fazla 1.000 ifade çalıştırır; aşılırsa yazma `permission-denied` ile reddedilir. `transactionValid` bu nedenle sade tutulur: `tests/rules/repository.test.ts` en ağır senaryoyu (beş uygulamaya dağıtılmış, kategorili, ödenmiş gider) doğrular. Kurala kontrol eklerseniz bu testi çalıştırın. Dağılımdaki uygulama varlığı ve yinelenmemesi istemci işleminde denetlenir; kural biçimi ve %100 toplamını denetler.
+
+## Oturum süresi
+
+Google oturumu tarayıcıda (IndexedDB) saklanır, böylece sayfa yenilemek veya bağlantı açmak yeniden giriş istemez. Oturum Google girişinden en fazla 5 gün sonra kapanır. Bu sınır yalnız istemcide değil, `signed()` kuralında `auth_time` ile de uygulanır: cihazda kalmış veya çalınmış bir yenileme belirteci 5 günden sonra hiçbir veri okuyamaz/yazamaz. Ortak cihazda çıkış yapılmalıdır; yetkiyi kaldırmak için `authorizedUsers` belgesinde `active=false` anında etkilidir.

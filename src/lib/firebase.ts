@@ -3,7 +3,7 @@ import {
   getAuth,
   GoogleAuthProvider,
   connectAuthEmulator,
-  inMemoryPersistence,
+  browserLocalPersistence,
   setPersistence,
 } from 'firebase/auth'
 import { initializeFirestore, memoryLocalCache, connectFirestoreEmulator } from 'firebase/firestore'
@@ -32,7 +32,7 @@ export const auth = app ? getAuth(app) : null
 export const db =
   runtime?.db ?? (app ? initializeFirestore(app, { localCache: memoryLocalCache() }) : null)
 export const authReady =
-  runtime?.authReady ?? (auth ? setPersistence(auth, inMemoryPersistence) : Promise.resolve())
+  runtime?.authReady ?? (auth ? setPersistence(auth, browserLocalPersistence) : Promise.resolve())
 export const googleProvider = new GoogleAuthProvider()
 googleProvider.setCustomParameters({ prompt: 'select_account' })
 if (!runtime && app && env.VITE_RECAPTCHA_SITE_KEY)

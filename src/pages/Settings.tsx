@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Download, Pencil, Plus, ShieldCheck, Trash2, Upload } from 'lucide-react'
 import { useAuth, friendlyError } from '../lib/auth'
-import { useEntities, useReference, useRefresh } from '../lib/data'
+import { useEntities, useLiveRates, useReference, useRefresh } from '../lib/data'
 import { defaultCategories, groupLabels } from '../lib/models'
 import type { Category, Rate, Settings } from '../lib/models'
 import { d, dateLabel, number, toMicros, today } from '../lib/finance'
@@ -261,6 +261,7 @@ export default function SettingsPage() {
           </div>
         </Panel>
       )}
+      {tab === 'rates' && <LiveRatesPanel admin={!!admin} onSaved={refresh} />}
       {tab === 'access' && (
         <Panel
           title="Yetkili erişim"
@@ -390,7 +391,15 @@ export default function SettingsPage() {
           }
           fields={
             form === 'general'
-              ? [{ name: 'name', label: 'Şirket görünen adı', required: true, full: true }]
+              ? [
+                  {
+                    name: 'name',
+                    label: 'Şirket görünen adı',
+                    required: true,
+                    full: true,
+                    example: 'Velon Apps',
+                  },
+                ]
               : form === 'rate'
                 ? [
                     {
@@ -407,7 +416,14 @@ export default function SettingsPage() {
                       required: true,
                       help: 'Dövizde USD/EUR/GBP; altında Gram, Çeyrek, Yarım, Tam veya özel ad. Borçtaki birimle birebir eşleşmeli.',
                     },
-                    { name: 'price', label: '1 birim için TRY fiyatı', required: true },
+                    {
+                      name: 'price',
+                      label: '1 birim için TRY fiyatı',
+                      required: true,
+                      numeric: true,
+                      example: '42,35',
+                      help: 'Bugünkü değer: 1 USD kaç TL, 1 gram altın kaç TL. Raporlardaki güncel TL karşılıkları bu fiyattan hesaplanır.',
+                    },
                     {
                       name: 'date',
                       label: 'Değerleme tarihi',
@@ -417,7 +433,13 @@ export default function SettingsPage() {
                     },
                   ]
                 : [
-                    { name: 'name', label: 'Kategori adı', required: true, full: true },
+                    {
+                      name: 'name',
+                      label: 'Kategori adı',
+                      required: true,
+                      full: true,
+                      example: 'Apple Search Ads',
+                    },
                     {
                       name: 'kind',
                       label: 'İşlem türü',
@@ -564,5 +586,78 @@ export default function SettingsPage() {
         </Modal>
       )}
     </>
+  )
+}
+function LiveRatesPanel({ admin, onSaved }: { admin: boolean; onSaved: () => Promise<void> }) {
+  const live = useLiveRates(),
+    { notify } = useToast(),
+    [saving, setSaving] = useState(false)
+  async function save() {
+    if (!live.data) return
+    setSaving(true)
+    try {
+      for (const r of live.data.rows)
+        await saveEntity('exchangeRates', {
+          unit: r.unit,
+          priceMicros: r.priceMicros,
+          date: today(),
+          asset: r.asset,
+        })
+      await onSaved()
+      notify('Güncel kurlar bugünün tarihiyle kaydedildi.')
+    } catch (e) {
+      notify(friendlyError(e), 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+  return (
+    <Panel
+      title="Canlı kurlar"
+      description="Raporlar ve borç kartları bu kurları otomatik kullanır. Kaydetmek isteğe bağlıdır; kaydedilen fiyat, canlı kaynak erişilemezse yedek olur."
+      action={
+        admin && (
+          <Button variant="secondary" disabled={!live.data || saving} onClick={() => void save()}>
+            {saving ? 'Kaydediliyor…' : 'Bugünün kurlarını kaydet'}
+          </Button>
+        )
+      }
+    >
+      <ErrorNotice error={live.error} />
+      {live.isPending ? (
+        <Loading />
+      ) : (
+        live.data && (
+          <>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Varlık</th>
+                    <th>Birim</th>
+                    <th>1 birim (TRY)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {live.data.rows.map((r) => (
+                    <tr key={r.asset + r.unit}>
+                      <td>
+                        <Badge>{r.asset === 'gold' ? 'Altın' : 'Döviz'}</Badge>
+                      </td>
+                      <td>{r.unit}</td>
+                      <td>{number(d(r.priceMicros).div(1e6).toNumber())}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Notice>
+              Kaynak: {live.data.source} · {live.data.updatedAt}. Alış-satış ortalamasıdır; resmî
+              değildir. Geçmiş işlemlerdeki kurlar bundan etkilenmez.
+            </Notice>
+          </>
+        )
+      )}
+    </Panel>
   )
 }

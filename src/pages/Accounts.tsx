@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { ArrowLeftRight, Landmark, Pencil, Plus, Wallet } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { useBalances, useReference } from '../lib/data'
-import { currencies } from '../lib/models'
+import { currencies, currencyOptions } from '../lib/models'
 import type { Account } from '../lib/models'
 import { fromMinor, money, toMicros, toMinor, today } from '../lib/finance'
 import { saveEntity, transfer } from '../lib/repository'
@@ -123,11 +123,20 @@ export default function Accounts() {
                 }
           }
           fields={[
-            { name: 'name', label: 'Hesap adı', required: true, full: true },
+            {
+              name: 'name',
+              label: 'Hesap adı',
+              required: true,
+              full: true,
+              example: 'Garanti TL vadesiz',
+              help: 'Paranın durduğu yer: banka hesabı, kasa, Apple’dan bekleyen bakiye gibi. Her para birimi için ayrı hesap aç.',
+            },
             {
               name: 'currency',
-              label: 'Para birimi (ISO kodu)',
+              label: 'Para birimi',
               required: true,
+              options: currencyOptions(form === 'new' ? [] : [form.currency]),
+              help: 'Bu hesapta hangi para duruyor? Kayıttan sonra değiştirilemez; farklı para birimi için ayrı hesap aç.',
               defaultValue: 'TRY',
               disabled: form !== 'new',
             },
@@ -140,6 +149,9 @@ export default function Accounts() {
               name: 'opening',
               label: 'Açılış bakiyesi',
               required: true,
+              numeric: true,
+              example: '15000',
+              help: 'Takibe başladığın gün hesapta ne kadar para vardı? Kayıttan sonra değiştirilemez.',
               defaultValue: '0',
               disabled: form !== 'new',
             },
@@ -148,6 +160,7 @@ export default function Accounts() {
               label: 'Açılış tarihi',
               type: 'date',
               required: true,
+              help: 'Açılış bakiyesinin geçerli olduğu gün. Bu tarihten önceye hareket girilemez.',
               defaultValue: today(),
               disabled: form !== 'new',
             },
@@ -200,14 +213,39 @@ export default function Accounts() {
                 .filter((a) => !a.archived)
                 .map((a) => ({ value: a.id, label: a.name + ' · ' + a.currency })),
             },
-            { name: 'amount', label: 'Çıkış tutarı (kaynak para birimi)', required: true },
-            { name: 'received', label: 'Giriş tutarı (hedef para birimi)', required: true },
-            { name: 'rate', label: 'Kaynak → TRY tarihsel kur', required: true, defaultValue: '1' },
+            {
+              name: 'amount',
+              label: 'Çıkış tutarı (kaynak para birimi)',
+              required: true,
+              numeric: true,
+              example: '4235',
+              help: 'Kaynak hesaptan çıkan tutar, o hesabın para biriminde.',
+            },
+            {
+              name: 'received',
+              label: 'Giriş tutarı (hedef para birimi)',
+              required: true,
+              numeric: true,
+              example: '100',
+              help: 'Hedef hesaba geçen tutar. Aynı para biriminde çıkışla aynı olmalı; döviz bozdurmada bankanın verdiği tutarı yaz.',
+            },
+            {
+              name: 'rate',
+              label: 'Kaynak → TRY tarihsel kur',
+              required: true,
+              defaultValue: '1',
+              numeric: true,
+              example: '1',
+              help: 'Kaynak hesabın para birimi için 1 birim kaç TL. TRY hesapta 1.',
+            },
             {
               name: 'receivedRate',
               label: 'Hedef → TRY tarihsel kur',
               required: true,
               defaultValue: '1',
+              numeric: true,
+              example: '42,35',
+              help: 'Hedef hesabın para birimi için 1 birim kaç TL. TRY hesapta 1.',
             },
             {
               name: 'date',

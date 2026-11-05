@@ -1,5 +1,28 @@
 import { z } from 'zod'
 export const currencies = ['TRY', 'USD', 'EUR', 'GBP'] as const
+const currencyNames: Record<string, string> = {
+  TRY: 'Türk lirası',
+  USD: 'Amerikan doları',
+  EUR: 'Euro',
+  GBP: 'İngiliz sterlini',
+}
+export const goldUnits = ['Gram', 'Çeyrek', 'Yarım', 'Tam', 'Cumhuriyet']
+// Seçim listeleri; extra, kayıtlı hesap/kur birimlerini de listeye katar ki eski değerler kaybolmasın.
+export function currencyOptions(extra: string[] = []) {
+  return [...new Set([...currencies, ...extra.filter((c) => /^[A-Z]{3}$/.test(c))])].map((c) => ({
+    value: c,
+    label: currencyNames[c] ? `${c} – ${currencyNames[c]}` : c,
+  }))
+}
+export function unitOptions(rates: { unit: string; asset: string }[] = []) {
+  const gold = [
+    ...new Set([...goldUnits, ...rates.filter((r) => r.asset === 'gold').map((r) => r.unit)]),
+  ]
+  return [
+    ...currencyOptions(rates.filter((r) => r.asset === 'currency').map((r) => r.unit)),
+    ...gold.map((g) => ({ value: 'gold:' + g, label: 'Altın – ' + g })),
+  ]
+}
 export const currencySchema = z.string().regex(/^[A-Z]{3}$/, 'Üç harfli para birimi kodu girin.')
 const text = z.string().trim().max(500)
 const id = z.string().max(128)

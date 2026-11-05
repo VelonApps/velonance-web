@@ -1,6 +1,6 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode, ButtonHTMLAttributes } from 'react'
-import { AlertCircle, ArrowUpRight, Check, Inbox, LoaderCircle, X } from 'lucide-react'
+import { AlertCircle, ArrowUpRight, Check, Inbox, Info, LoaderCircle, X } from 'lucide-react'
 import { friendlyError } from '../lib/auth'
 import { dateLabel, periodRange } from '../lib/finance'
 import type { Period } from '../lib/finance'
@@ -221,9 +221,81 @@ export type FieldDef = {
   options?: { value: string; label: string }[]
   required?: boolean
   help?: string
+  example?: string
+  numeric?: boolean
   disabled?: boolean
   defaultValue?: string
   full?: boolean
+}
+function FieldItem({
+  field: f,
+  register,
+  error,
+}: {
+  field: FieldDef
+  register: (name: string) => object
+  error?: string
+}) {
+  const [open, setOpen] = useState(false),
+    id = useId(),
+    placeholder = f.example ? 'Örn. ' + f.example : undefined
+  return (
+    <div className={'field ' + (f.full ? 'full' : '')}>
+      <span className="field-label">
+        <label htmlFor={id}>
+          {f.label}
+          {f.required && <b> *</b>}
+        </label>
+        {f.help && (
+          <button
+            type="button"
+            className={'field-info ' + (open ? 'open' : '')}
+            aria-label="Açıklamayı göster"
+            aria-expanded={open}
+            title={f.help}
+            onClick={() => setOpen(!open)}
+          >
+            <Info size={13} />
+          </button>
+        )}
+      </span>
+      {f.options ? (
+        <select id={id} {...register(f.name)} disabled={f.disabled}>
+          {f.options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      ) : f.type === 'textarea' ? (
+        <textarea
+          id={id}
+          rows={3}
+          placeholder={placeholder}
+          {...register(f.name)}
+          disabled={f.disabled}
+        />
+      ) : (
+        <input
+          id={id}
+          type={f.type || 'text'}
+          inputMode={f.numeric ? 'decimal' : undefined}
+          step={f.type === 'number' ? 'any' : undefined}
+          placeholder={placeholder}
+          aria-invalid={error ? true : undefined}
+          {...register(f.name)}
+          disabled={f.disabled}
+        />
+      )}
+      {open && f.help && <small className="field-help">{f.help}</small>}
+      {error && (
+        <small role="alert" className="field-error">
+          {error}
+          {f.example && !error.includes('Örnek') ? ' Örnek: ' + f.example : ''}
+        </small>
+      )}
+    </div>
+  )
 }
 export function Fields({
   fields,
@@ -237,36 +309,12 @@ export function Fields({
   return (
     <div className="form-grid">
       {fields.map((f) => (
-        <label className={'field ' + (f.full ? 'full' : '')} key={f.name}>
-          <span>
-            {f.label}
-            {f.required && <b> *</b>}
-          </span>
-          {f.options ? (
-            <select {...register(f.name)} disabled={f.disabled}>
-              {f.options.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          ) : f.type === 'textarea' ? (
-            <textarea rows={3} {...register(f.name)} disabled={f.disabled} />
-          ) : (
-            <input
-              type={f.type || 'text'}
-              step={f.type === 'number' ? 'any' : undefined}
-              {...register(f.name)}
-              disabled={f.disabled}
-            />
-          )}{' '}
-          {f.help && <small>{f.help}</small>}
-          {Boolean((errors?.[f.name] as { message?: string } | undefined)?.message) && (
-            <small role="alert" className="field-error">
-              {String((errors?.[f.name] as { message?: string } | undefined)?.message)}
-            </small>
-          )}
-        </label>
+        <FieldItem
+          key={f.name}
+          field={f}
+          register={register}
+          error={(errors?.[f.name] as { message?: string } | undefined)?.message}
+        />
       ))}
     </div>
   )

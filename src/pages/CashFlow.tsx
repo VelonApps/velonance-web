@@ -3,13 +3,19 @@ import { useQuery } from '@tanstack/react-query'
 import { expectedPayments, periodAccountBalances } from '../lib/repository'
 import { ArrowDownLeft, ArrowUpRight, ChartNoAxesCombined, Wallet } from 'lucide-react'
 import { format, startOfWeek, addDays } from 'date-fns'
-import { useBalances, useObligations, useRecurring, useReference, useReport } from '../lib/data'
+import {
+  useBalances,
+  useObligations,
+  useRecurring,
+  useReference,
+  useReport,
+  useRates,
+} from '../lib/data'
 import {
   cashTotals,
   d,
   dateLabel,
   dueOccurrences,
-  latestRates,
   rateKey,
   money,
   remaining,
@@ -44,7 +50,8 @@ export default function CashFlow() {
     debts = useObligations(),
     recurring = useRecurring(),
     balances = useBalances(ref.accounts),
-    rates = latestRates(ref.rates),
+    liveRates = useRates(),
+    rates = liveRates.rates,
     [group, setGroup] = useState('monthly')
   const periodBalances = useQuery({
     queryKey: [

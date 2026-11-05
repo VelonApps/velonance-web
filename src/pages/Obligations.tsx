@@ -3,7 +3,7 @@ import { ArrowDownLeft, ArrowUpRight, Coins, Plus } from 'lucide-react'
 import { getDocs, query, where } from 'firebase/firestore'
 import { useQuery } from '@tanstack/react-query'
 import { friendlyError, useAuth } from '../lib/auth'
-import { useObligations, useReference, useRefresh } from '../lib/data'
+import { useObligations, useReference, useRefresh, useRates } from '../lib/data'
 import {
   cancelObligation,
   createObligation,
@@ -15,7 +15,6 @@ import {
 import {
   d,
   dateLabel,
-  latestRates,
   rateKey,
   money,
   number,
@@ -26,8 +25,9 @@ import {
   today,
   valueQuantity,
 } from '../lib/finance'
+import { currencyOptions, unitOptions } from '../lib/models'
 import type { Obligation, Repayment } from '../lib/models'
-import { EntityForm } from '../components/EntityForm'
+import { EntityForm, useRateSync } from '../components/EntityForm'
 import {
   Badge,
   Button,
@@ -45,11 +45,14 @@ export default function Obligations() {
   const { authorization } = useAuth(),
     obligations = useObligations(),
     ref = useReference(),
-    rates = latestRates(ref.rates),
+    liveRates = useRates(),
+    rates = liveRates.rates,
     [filter, setFilter] = useState('all'),
     [form, setForm] = useState<'payable' | 'receivable' | Obligation | null>(null),
     [view, setView] = useState<Obligation | null>(null),
     [edit, setEdit] = useState<Obligation | null>(null),
+    syncDebt = useRateSync({ quantity: 'quantity', rate: 'originalRate', total: 'tryTotal' }),
+    syncPayment = useRateSync({ quantity: 'amount', rate: 'rate', total: 'tryTotal' }),
     refresh = useRefresh(),
     { notify } = useToast(),
     [key, setKey] = useState(() => crypto.randomUUID())
@@ -210,30 +213,58 @@ export default function Obligations() {
           key={key}
           title={form === 'payable' ? 'Yeni borç' : 'Yeni alacak'}
           onClose={() => setForm(null)}
+          onFieldChange={syncDebt}
           fields={[
-            { name: 'title', label: 'Başlık', required: true, full: true },
-            { name: 'counterparty', label: 'Karşı taraf', required: true },
             {
-              name: 'asset',
-              label: 'Varlık türü',
-              options: [
-                { value: 'currency', label: 'Para birimi' },
-                { value: 'gold', label: 'Altın' },
-              ],
+              name: 'title',
+              label: 'Başlık',
+              required: true,
+              full: true,
+              example:
+                form === 'payable' ? 'Ahmet’ten alınan dolar borcu' : 'Mehmet’e verilen avans',
+              help: 'Bu borcu/alacağı listede tanıyacağın kısa bir ad.',
+            },
+            {
+              name: 'counterparty',
+              label: 'Karşı taraf',
+              required: true,
+              example: 'Ahmet Yılmaz',
+              help:
+                form === 'payable'
+                  ? 'Parayı veya altını KİMDEN aldın? Kişi ya da kurum adı yaz (örn. Ahmet Yılmaz, Garanti Bankası).'
+                  : 'Parayı veya altını KİME verdin? Kişi ya da kurum adı yaz.',
             },
             {
               name: 'unit',
-              label: 'Birim',
+              label: 'Para birimi / altın',
               required: true,
               defaultValue: 'TRY',
-              help: 'TRY, USD, EUR, GBP veya Gram / Çeyrek / Yarım / Tam / özel altın birimi.',
+              options: unitOptions(ref.rates),
+              help: 'Ne aldın ya da verdin? Para birimi veya altın türünü seç. Altın borçları gram/çeyrek gibi kendi biriminde takip edilir; listede olmayan altın türü için önce Ayarlar → Döviz ve altın ekranından fiyatını ekle.',
             },
-            { name: 'quantity', label: 'Orijinal miktar', required: true },
+            {
+              name: 'quantity',
+              label: 'Orijinal miktar',
+              required: true,
+              numeric: true,
+              example: '1000',
+              help: 'Seçtiğin birimden ne kadar? Örn. 1000 dolar için 1000, 10 gram altın için 10. Binlik ayıracı (nokta) kullanma.',
+            },
             {
               name: 'originalRate',
               label: '1 birimin ilk TRY değeri',
               required: true,
               defaultValue: '1',
+              numeric: true,
+              example: '42,35',
+              help: 'Borç alındığı gün 1 birim kaç TL idi? Örn. 1 USD = 42,35. TRY için 1 kalır. Kuru bilmiyorsan yandaki toplam TL alanını doldur, kur kendiliğinden hesaplanır.',
+            },
+            {
+              name: 'tryTotal',
+              label: 'Toplam TL karşılığı',
+              numeric: true,
+              example: '4235',
+              help: 'Bu borcun alındığı günkü toplam TL değeri. Miktarı ve kuru girersen kendiliğinden dolar; toplamı yazarsan 1 birimin TL değeri hesaplanır.',
             },
             {
               name: 'date',
@@ -248,6 +279,7 @@ export default function Obligations() {
               type: 'date',
               required: true,
               defaultValue: today(),
+              help: 'Ödenmesi gereken son gün. Bu tarih geçince kart “Vadesi geçti” olarak işaretlenir.',
             },
             {
               name: 'cash',
@@ -256,7 +288,7 @@ export default function Obligations() {
                 { value: 'no', label: 'Nakit hareketi yok / önceki dönem' },
                 { value: 'yes', label: 'Anapara hesaba girdi / hesaptan çıktı' },
               ],
-              help: 'Altın tesliminde nakit hesabı kullanılmaz.',
+              help: 'Para bir hesabına girdiyse (borç) veya hesabından çıktıysa (alacak) “Anapara hesaba girdi” seç ve hesabı seç. Elden altın ya da eski tarihli bir borçsa “Nakit hareketi yok” bırak.',
             },
             {
               name: 'accountId',
@@ -268,19 +300,33 @@ export default function Obligations() {
                   .map((a) => ({ value: a.id, label: a.name + ' · ' + a.currency })),
               ],
             },
-            { name: 'interest', label: 'Sözleşme faizi (%)', defaultValue: '0' },
-            { name: 'terms', label: 'Ödeme koşulları', type: 'textarea', full: true },
+            {
+              name: 'interest',
+              label: 'Sözleşme faizi (%)',
+              defaultValue: '0',
+              numeric: true,
+              example: '0',
+              help: 'Sadece bilgi amaçlı; otomatik faiz hesaplanmaz. Faizsizse 0.',
+            },
+            {
+              name: 'terms',
+              label: 'Ödeme koşulları',
+              type: 'textarea',
+              full: true,
+              example: '3 ayda eşit taksit, her ayın 15’i',
+            },
             { name: 'notes', label: 'Not', type: 'textarea', full: true },
           ]}
           onSave={(v) => {
-            const unit = v.asset === 'currency' ? v.unit.toUpperCase() : v.unit,
-              rate = v.asset === 'currency' && unit === 'TRY' ? 1000000 : toMicros(v.originalRate)
+            const asset = v.unit.startsWith('gold:') ? 'gold' : 'currency',
+              unit = asset === 'gold' ? v.unit.slice(5) : v.unit,
+              rate = unit === 'TRY' ? 1000000 : toMicros(v.originalRate)
             return createObligation(
               {
                 direction: form,
                 counterparty: v.counterparty,
                 title: v.title,
-                asset: v.asset as 'currency' | 'gold',
+                asset,
                 unit,
                 quantityMicros: toMicros(v.quantity),
                 originalRateMicros: rate,
@@ -310,11 +356,14 @@ export default function Obligations() {
           key={key}
           title="Anapara ödemesi kaydet"
           onClose={() => setForm(null)}
+          onFieldChange={syncPayment}
           fields={[
             {
               name: 'quantity',
               label: `Kapatılan ${form.unit} miktarı`,
               required: true,
+              numeric: true,
+              example: '250',
               help: `Kalan: ${number(remaining(form) / 1e6)} ${form.unit}`,
             },
             {
@@ -331,10 +380,32 @@ export default function Obligations() {
               name: 'currency',
               label: 'Gerçek ödeme para birimi',
               defaultValue: form.asset === 'currency' ? form.unit : 'TRY',
-              help: 'Ayni teslim seçilirse bu alan dikkate alınmaz.',
+              options: currencyOptions(ref.accounts.map((a) => a.currency)),
+              help: 'Ödemeyi hangi para biriminde yaptın? Altını elden teslim ettiysen bu alan dikkate alınmaz.',
             },
-            { name: 'amount', label: 'Gerçek nakit tutarı', defaultValue: '0' },
-            { name: 'rate', label: 'Gerçek ödemenin TRY kuru', defaultValue: '1' },
+            {
+              name: 'amount',
+              label: 'Gerçek nakit tutarı',
+              defaultValue: '0',
+              numeric: true,
+              example: '250',
+              help: 'Hesaptan gerçekten çıkan/giren para. Aynı birimde ödüyorsan kapatılan miktarla aynı olur.',
+            },
+            {
+              name: 'rate',
+              label: 'Gerçek ödemenin TRY kuru',
+              defaultValue: '1',
+              numeric: true,
+              example: '42,35',
+              help: 'Ödeme günü 1 birim kaç TL idi? TRY için 1 kalır. Bilmiyorsan aşağıya toplam TL tutarını yaz.',
+            },
+            {
+              name: 'tryTotal',
+              label: 'Ödemenin toplam TL karşılığı',
+              numeric: true,
+              example: '10.587,50',
+              help: 'Nakit tutarı ile kuru girersen kendiliğinden dolar; toplam TL’yi yazarsan kur hesaplanır.',
+            },
             {
               name: 'accountId',
               label: 'Ödeme hesabı',

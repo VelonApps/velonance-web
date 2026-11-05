@@ -94,7 +94,11 @@ describe('Erişim ve arayüz', () => {
   it('boş gelir formu kaydedilemez', async () => {
     wrapped(<TransactionForm kind="income" onClose={() => {}} />)
     await userEvent.click(screen.getByRole('button', { name: 'İşlemi kaydet' }))
-    expect(await screen.findByText('En az iki karakter girin.')).toBeInTheDocument()
+    expect(
+      await screen.findByText(
+        'Başlık en az iki karakter olmalı. Örnek: App Store Ekim 2026 geliri',
+      ),
+    ).toBeInTheDocument()
     expect(mocks.save).not.toHaveBeenCalled()
   })
   it('gelir formu gerçek kayıt servisine tarihsel dönüşüm gönderir', async () => {

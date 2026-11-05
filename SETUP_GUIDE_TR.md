@@ -206,7 +206,7 @@ Actions deploy URL'sini açın. Örüntü `https://USERNAME.github.io/REPOSITORY
 
 OAuth tarafında `redirect_uri_mismatch` çıkarsa Firebase'in verdiği `authDomain` değerini değiştirmediğinizi kontrol edin. Google Cloud → APIs & Services → Credentials → Firebase'in kullandığı OAuth web client kaydında redirect URI, Firebase auth domain'in `https://AUTH_DOMAIN/__/auth/handler` adresiyle uyumlu olmalıdır. Mevcut Firebase tarafından oluşturulan client kaydını kullanın; rastgele yeni client ID veya GitHub Pages callback yolu üretmeyin. OAuth consent ekranı test kullanıcıları/kurum kısıtlaması gerektiriyorsa gerçek hesaplarınız için Google Cloud ayarlarını tamamlayın.
 
-Doğrulama: Google popup kapanır, doğru kullanıcı dashboard'a erişir. Sayfa yenilenince bellekteki oturum nedeniyle tekrar giriş istenmesi normaldir.
+Doğrulama: Google popup kapanır, doğru kullanıcı dashboard'a erişir. Oturum bu tarayıcıda 5 gün açık kalır; sonra yeniden Google girişi istenir. Ortak bilgisayarda işin bitince çıkış yap.
 
 ## 18. Yetkisiz hesabı ve VIEWER rolünü deneyin
 
@@ -230,24 +230,24 @@ Doğrulama: yetkisiz istek permission-denied; yönetici kayıtları doğru tenan
 
 ## 20. Sorun giderme
 
-| Belirti                            | Kontrol / çözüm                                                                                              |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Kurulum kartı görünüyor            | Beş zorunlu VITE alanı, doğru `.env.local`, dev server yeniden başlatma veya Actions Variables + yeni deploy |
-| auth/unauthorized-domain           | Authentication → Settings → Authorized domains; yalnız hostname                                              |
-| Popup blocked / kapandı            | Açılır pencereye izin verin; Google düğmesini tekrar kullanın                                                |
-| Google başarılı ama erişim yok     | Doğru UID belge ID'si, uid alanı, tam e-posta, active boolean, ADMIN/VIEWER, studioId eşleşmesi              |
-| permission-denied                  | Kuralların doğru projeye deploy edildiği, geçerli rol ve şema/hesap para birimi kontrolü                     |
-| Requires an index                  | `firestore.indexes.json` deploy; Console'da Enabled bekleyin                                                 |
-| Boş grafik                         | Seçili tarih aralığı, tahakkuk/ödeme ayrımı; veri yoksa boş görünüm normal                                   |
-| Rapor 1.000 sınırı                 | Daha dar dönem seçin; büyük ölçekte sunucu özeti gerekir                                                     |
-| Döviz/altın toplamı eksik          | Ayarlar → Döviz ve altın → bugün veya öncesine ait fiyat; özgün birim adıyla aynı                            |
-| Hesap açılışı değişmiyor           | Bilerek kilitlidir; işlenmiş defterin açılışını sessizce değiştirmeyin                                       |
-| Java bulunamadı                    | Java 21 kurun; `JAVA_HOME`, `java -version`; sonra test:rules                                                |
-| Emulator port in use               | 8080/9099 yerel süreçlerini kontrol edin; üretim ayarıyla karıştırmayın                                      |
-| Sayfa/asset 404                    | Base path repo adı ve iki slash; Source=Actions; HashRouter URL'si                                           |
-| Actions config eksik               | Değerleri Settings → Secrets and variables → Actions altına tam aynı adlarla ekleyin                         |
-| Auth token/oturum yenilemede kayıp | Bellek kalıcılığı kasıtlı; yeniden giriş yapın                                                               |
-| Çoklu cihazda eski liste           | Sayfayı/filtreyi yenileyin; finans koleksiyonlarında sürekli listener yok                                    |
+| Belirti                             | Kontrol / çözüm                                                                                              |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Kurulum kartı görünüyor             | Beş zorunlu VITE alanı, doğru `.env.local`, dev server yeniden başlatma veya Actions Variables + yeni deploy |
+| auth/unauthorized-domain            | Authentication → Settings → Authorized domains; yalnız hostname                                              |
+| Popup blocked / kapandı             | Açılır pencereye izin verin; Google düğmesini tekrar kullanın                                                |
+| Google başarılı ama erişim yok      | Doğru UID belge ID'si, uid alanı, tam e-posta, active boolean, ADMIN/VIEWER, studioId eşleşmesi              |
+| permission-denied                   | Kuralların doğru projeye deploy edildiği, geçerli rol ve şema/hesap para birimi kontrolü                     |
+| Requires an index                   | `firestore.indexes.json` deploy; Console'da Enabled bekleyin                                                 |
+| Boş grafik                          | Seçili tarih aralığı, tahakkuk/ödeme ayrımı; veri yoksa boş görünüm normal                                   |
+| Rapor 1.000 sınırı                  | Daha dar dönem seçin; büyük ölçekte sunucu özeti gerekir                                                     |
+| Döviz/altın toplamı eksik           | Ayarlar → Döviz ve altın → bugün veya öncesine ait fiyat; özgün birim adıyla aynı                            |
+| Hesap açılışı değişmiyor            | Bilerek kilitlidir; işlenmiş defterin açılışını sessizce değiştirmeyin                                       |
+| Java bulunamadı                     | Java 21 kurun; `JAVA_HOME`, `java -version`; sonra test:rules                                                |
+| Emulator port in use                | 8080/9099 yerel süreçlerini kontrol edin; üretim ayarıyla karıştırmayın                                      |
+| Sayfa/asset 404                     | Base path repo adı ve iki slash; Source=Actions; HashRouter URL'si                                           |
+| Actions config eksik                | Değerleri Settings → Secrets and variables → Actions altına tam aynı adlarla ekleyin                         |
+| 5 günde bir yeniden giriş isteniyor | Kasıtlı güvenlik sınırı; kurallar da 5 günden eski oturumu reddeder                                          |
+| Çoklu cihazda eski liste            | Sayfayı/filtreyi yenileyin; finans koleksiyonlarında sürekli listener yok                                    |
 
 ## Opsiyonel App Check
 

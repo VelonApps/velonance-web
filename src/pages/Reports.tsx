@@ -1,8 +1,15 @@
 import { useState } from 'react'
 import { BarChart3, Download, Plus } from 'lucide-react'
 import { useAuth } from '../lib/auth'
-import { useBalances, useEntities, useObligations, useReference, useReport } from '../lib/data'
-import { groupLabels } from '../lib/models'
+import {
+  useBalances,
+  useEntities,
+  useObligations,
+  useReference,
+  useReport,
+  useRates,
+} from '../lib/data'
+import { currencyOptions, groupLabels } from '../lib/models'
 import type { Campaign } from '../lib/models'
 import {
   adMetrics,
@@ -13,7 +20,6 @@ import {
   dateLabel,
   debtSummary,
   fromMinor,
-  latestRates,
   money,
   number,
   previousRange,
@@ -102,15 +108,14 @@ export default function Reports() {
     byCategory = breakdown(rows, 'expense', (r) => categoryName(r.categoryId)),
     byVendor = breakdown(rows, 'expense', (r) => r.vendor.trim() || 'Belirtilmedi'),
     incomeByCategory = breakdown(rows, 'income', (r) => categoryName(r.categoryId)),
-    rates = latestRates(ref.rates),
+    liveRates = useRates(),
+    rates = liveRates.rates,
     cash = valuation(balances.data || [], rates),
     debts = debtSummary(obligations.data?.rows || [], rates),
     openDebts = (obligations.data?.rows || [])
       .filter((o) => remaining(o) > 0)
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate)),
-    missingRates = [
-      ...new Set([...cash.missing, ...debts.payable.missing, ...debts.receivable.missing]),
-    ],
+    missingRates = [...new Set([...debts.payable.missing, ...debts.receivable.missing])],
     monthly = chartMonths(rows),
     apps = ref.apps.map((a) => ({ app: a, ...profitability(a, rows) })),
     visibleCampaigns = (campaigns.data?.rows || []).filter(
@@ -227,11 +232,11 @@ export default function Reports() {
               </div>
               <div>
                 <dt>Açık alacaklar ({debts.receivable.count})</dt>
-                <dd>{money(debts.receivable.current)}</dd>
+                <dd>{money(debts.receivable.estimate)}</dd>
               </div>
               <div>
                 <dt>Açık borçlar ({debts.payable.count})</dt>
-                <dd>{money(debts.payable.current)}</dd>
+                <dd>{money(debts.payable.estimate)}</dd>
               </div>
               <div>
                 <dt>Net pozisyon</dt>
@@ -239,8 +244,8 @@ export default function Reports() {
                   <strong>
                     {money(
                       d(cash.amount)
-                        .plus(debts.receivable.current)
-                        .minus(debts.payable.current)
+                        .plus(debts.receivable.estimate)
+                        .minus(debts.payable.estimate)
                         .toNumber(),
                     )}
                   </strong>
@@ -253,12 +258,15 @@ export default function Reports() {
                 </dd>
               </div>
             </dl>
-            {missingRates.length > 0 && (
-              <Notice>
-                Fiyatı girilmediği için toplama katılmayan birimler: {missingRates.join(', ')}.
-                Ayarlar → Döviz ve altın ekranından ekleyin.
-              </Notice>
-            )}
+            <Notice>
+              {liveRates.live
+                ? `Kurlar: ${liveRates.live.source} canlı verisi (${liveRates.live.updatedAt}). Resmî değildir, yaklaşık değerdir.`
+                : 'Canlı kur alınamadı; Ayarlar → Döviz ve altın ekranında kayıtlı son fiyatlar kullanılıyor.'}
+              {missingRates.length > 0 &&
+                ` Güncel fiyatı olmayan borç birimleri (${missingRates.join(', ')}) ilk kurlarıyla toplandı.`}
+              {cash.missing.length > 0 &&
+                ` Fiyatı olmayan hesaplar (${cash.missing.join(', ')}) nakit toplamına katılmadı.`}
+            </Notice>
           </Panel>
           <div className="dashboard-grid equal">
             <Panel title="Aylık gelir / gider">
@@ -332,7 +340,7 @@ export default function Reports() {
                         <td>
                           {number(left / 1e6)} {o.unit}
                         </td>
-                        <td>{price ? money(valueQuantity(left, price)) : 'Fiyat yok'}</td>
+                        <td>{price ? money(valueQuantity(left, price)) : 'Fiyat yok (ilk kur)'}</td>
                         <td>{money(valueQuantity(left, o.originalRateMicros))}</td>
                         <td>
                           {dateLabel(o.dueDate)}{' '}
@@ -478,7 +486,7 @@ export default function Reports() {
                 }
           }
           fields={[
-            { name: 'name', label: 'Kampanya adı', required: true },
+            { name: 'name', label: 'Kampanya adı', required: true, example: 'NexaRoom – TR Ekim' },
             { name: 'platform', label: 'Platform', required: true },
             {
               name: 'applicationId',
@@ -488,8 +496,21 @@ export default function Reports() {
                 ...ref.apps.map((a) => ({ value: a.id, label: a.name })),
               ],
             },
-            { name: 'currency', label: 'Para birimi', required: true, defaultValue: 'TRY' },
-            { name: 'spend', label: 'Harcama', required: true },
+            {
+              name: 'currency',
+              label: 'Para birimi',
+              required: true,
+              defaultValue: 'TRY',
+              options: currencyOptions(ref.accounts.map((a) => a.currency)),
+            },
+            {
+              name: 'spend',
+              label: 'Harcama',
+              required: true,
+              numeric: true,
+              example: '1250',
+              help: 'Reklam panelindeki toplam harcama. Bu sadece analiz içindir; gideri ayrıca Giderler ekranına girmelisin.',
+            },
             {
               name: 'revenue',
               label: 'İlişkilendirilmiş gelir',

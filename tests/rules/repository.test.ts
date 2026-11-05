@@ -62,6 +62,8 @@ beforeEach(async () => {
       email: 'admin@example.test',
       email_verified: true,
       firebase: { sign_in_provider: 'google.com' },
+      // Gerçek Firebase belirteçlerinde her zaman bulunur; kurallar 5 günlük oturum sınırı için kullanır.
+      auth_time: Math.floor(Date.now() / 1000),
     })
     .firestore()
   await saveEntity(

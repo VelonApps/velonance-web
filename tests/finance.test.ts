@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  syncRate,
   breakdown,
   changePercent,
   debtSummary,
@@ -80,7 +81,7 @@ describe('Decimal para ve kur hesabı', () => {
   it('EUR dönüşümü', () => expect(convert(12345, 'EUR', 46500000)).toBe(574043))
   it('sıfır basamaklı JPY ve üç basamaklı KWD', () => {
     expect(toMinor('100', 'JPY')).toBe(100)
-    expect(toMinor('1.234', 'KWD')).toBe(1234)
+    expect(toMinor('1,234', 'KWD')).toBe(1234)
     expect(convert(1234, 'KWD', 120000000)).toBe(14808)
   })
   it('fazla ondalık basamağı reddeder', () => expect(() => toMinor('1.001')).toThrow())
@@ -300,8 +301,13 @@ describe('Tutar girişi', () => {
     ['1.234.567,89', 123456789],
     ['1234.56', 123456],
     ['1.234.567', 123456700],
+    ['4300', 430000],
+    ['12.5', 1250],
     [' 12 ', 1200],
   ])('%s', (text, minor) => expect(toMinor(text)).toBe(minor))
+  it.each(['4.300', '1.250', '-12.500'])('belirsiz %s reddedilir', (text) =>
+    expect(() => parseAmount(text)).toThrow('iki türlü'),
+  )
   it('sayı olmayan girişi Türkçe mesajla reddeder', () =>
     expect(() => parseAmount('abc')).toThrow('Geçerli bir sayı'))
 })
@@ -371,5 +377,27 @@ describe('Rapor hesapları', () => {
     expect(result.payable).toMatchObject({ count: 3, overdue: 1, current: 63000, missing: ['EUR'] })
     expect(result.receivable).toMatchObject({ count: 1, current: 0, missing: ['Gram'] })
     expect(result.receivable.historical).toBe(3000000)
+    expect(result.payable).toMatchObject({ estimate: 63000 + 40000, fallbackCount: 1 })
+    expect(result.receivable.estimate).toBe(3000000)
+  })
+})
+describe('Kur ve toplam TL bağlantısı', () => {
+  const v = (quantity: string, rate: string, total: string) => ({ quantity, rate, total })
+  it('miktar ve kurdan toplamı hesaplar', () =>
+    expect(syncRate('rate', v('100', '42,35', ''), 'rate')).toEqual({ total: '4235' }))
+  it('toplamdan kuru hesaplar', () =>
+    expect(syncRate('total', v('100', '', '4.235,50'), 'total')).toEqual({ rate: '42,355' }))
+  it('belirsiz toplamda kuru değiştirmez', () =>
+    expect(syncRate('total', v('200', '', '4.300'), 'total')).toEqual({}))
+  it('miktar değişince en son elle yazılanı korur', () => {
+    expect(syncRate('quantity', v('200', '42,35', '4235'), 'rate')).toEqual({ total: '8470' })
+    expect(syncRate('quantity', v('200', '42,35', '4235'), 'total')).toEqual({ rate: '21,175' })
+  })
+  it('kuru altı basamağa yuvarlar', () =>
+    expect(syncRate('total', v('3', '', '100'), 'total')).toEqual({ rate: '33,333333' }))
+  it('eksik veya geçersiz girişte bir şey değiştirmez', () => {
+    expect(syncRate('rate', v('', '42', ''), 'rate')).toEqual({})
+    expect(syncRate('total', v('100', '', 'abc'), 'total')).toEqual({})
+    expect(syncRate('rate', v('0', '42', ''), 'rate')).toEqual({})
   })
 })

@@ -1,7 +1,7 @@
 rules_version = '2';
 service cloud.firestore {
  match /databases/{database}/documents {
-  function signed() { return request.auth != null && request.auth.token.email_verified == true && request.auth.token.firebase.sign_in_provider == 'google.com'; }
+  function signed() { return request.auth != null && request.auth.token.email_verified == true && request.auth.token.firebase.sign_in_provider == 'google.com' && request.time < timestamp.value(request.auth.token.auth_time * 1000) + duration.value(5, 'd'); }
   function me() {return get(/databases/$(database)/documents/authorizedUsers/$(request.auth.uid)).data;}
   function member(studio) {let u=me();return signed() && u.uid == request.auth.uid && u.email == request.auth.token.email && u.active == true && u.studioId == studio && u.role in ['ADMIN','VIEWER'];}
   function admin(studio) {return member(studio) && me().role == 'ADMIN';}

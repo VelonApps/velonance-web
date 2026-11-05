@@ -23,6 +23,22 @@ type AuthState = {
   logout: () => Promise<void>
 }
 const Context = createContext<AuthState | null>(null)
+// Google ile girişten sonra oturum en fazla bu kadar açık kalır; firestore.rules aynı süreyi sunucuda da uygular.
+export const SESSION_DAYS = 5
+const SESSION_MS = SESSION_DAYS * 24 * 60 * 60 * 1000
+export const sessionExpired = (authTime: string, now = Date.now()) =>
+  !authTime || now - Date.parse(authTime) >= SESSION_MS
+const loggedKey = 'velonance-logged-session'
+// Sayfa yenilemek yeni giriş değildir: her Google oturumu için yalnız bir giriş kaydı yazılır.
+function firstVisitOf(session: string) {
+  try {
+    if (localStorage.getItem(loggedKey) === session) return false
+    localStorage.setItem(loggedKey, session)
+  } catch {
+    /* Depolama kapalıysa kayıt yine yazılır. */
+  }
+  return true
+}
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null),
     [authorization, setAuthorization] = useState<Authorization | null>(null),
@@ -32,8 +48,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logged = useRef('')
   useEffect(() => {
     if (!auth) return
-    let offRole = () => {}
-    const off = onAuthStateChanged(auth, (u) => {
+    let offRole = () => {},
+      authTime = ''
+    const expire = () => {
+      if (auth?.currentUser && sessionExpired(authTime)) {
+        void signOut(auth).then(() =>
+          setError(`Güvenlik için oturum ${SESSION_DAYS} günde bir kapanır. Tekrar giriş yapın.`),
+        )
+        return true
+      }
+      return false
+    }
+    const timer = setInterval(expire, 10 * 60 * 1000)
+    const off = onAuthStateChanged(auth, async (u) => {
       offRole()
       cache.clear()
       setUser(u)
@@ -45,6 +72,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
       setLoading(true)
+      try {
+        authTime = (await u.getIdTokenResult()).authTime
+      } catch {
+        authTime = ''
+      }
+      if (expire()) return
       offRole = onSnapshot(
         doc(db, 'authorizedUsers', u.uid),
         (snap) => {
@@ -61,7 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const state = u.uid + ':' + String(!!allowed)
           if (logged.current !== state) {
             logged.current = state
-            void (allowed ? recordAccess('sign_in') : recordDenied())
+            if (!allowed) void recordDenied()
+            else if (firstVisitOf(u.uid + ':' + authTime)) void recordAccess('sign_in')
           }
           if (!allowed) {
             cache.clear()
@@ -84,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       off()
       offRole()
+      clearInterval(timer)
     }
   }, [cache])
   async function login() {

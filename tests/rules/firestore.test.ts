@@ -29,6 +29,8 @@ function client(uid: string, claims: Record<string, unknown> = {}) {
       email: uid + '@example.test',
       email_verified: true,
       firebase: { sign_in_provider: 'google.com' },
+      // Gerçek Firebase belirteçlerinde her zaman bulunur; kurallar 5 günlük oturum sınırı için kullanır.
+      auth_time: Math.floor(Date.now() / 1000),
       ...claims,
     })
     .firestore()
@@ -191,6 +193,18 @@ describe('Deny-by-default ve roller', () => {
         ),
       ),
     ))
+  it('5 günü geçen Google oturumu veri okuyamaz', async () => {
+    const days = (n: number) => Math.floor(Date.now() / 1000) - n * 24 * 60 * 60
+    await assertSucceeds(
+      getDoc(doc(client('admin', { auth_time: days(4) }), base, 'transactions', 'existing')),
+    )
+    await assertFails(
+      getDoc(doc(client('admin', { auth_time: days(6) }), base, 'transactions', 'existing')),
+    )
+    await assertFails(
+      setDoc(doc(client('admin', { auth_time: days(6) }), base, 'transactions', 'new'), income()),
+    )
+  })
   it('pasif yetki kaydı erişemez', async () => {
     await adminSeed('authorizedUsers/admin', {
       uid: 'admin',
